@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 import hashlib
 import json
 import os
@@ -34,7 +35,7 @@ def verify_auth(authorization: str = Header(None), a2a_version: str = Header(Non
 @app.get("/.well-known/agent-card.json")
 async def get_agent_card(request: Request):
     base_url = str(request.base_url).rstrip("/") + "/a2a/"
-    return {
+    card_data = {
         "name": "Invoice Action Agent",
         "description": "A2A compliant invoice verification and action agent",
         "version": "1.0.0",
@@ -55,6 +56,7 @@ async def get_agent_card(request: Request):
             "application/vnd.ga5.invoice-action-receipts+json"
         ]
     }
+    return JSONResponse(content=card_data, media_type="application/a2a+json")
 
 @app.post("/a2a/message:send")
 async def message_send(request: Request, authorization: str = Header(None), a2a_version: str = Header(None)):
@@ -76,7 +78,7 @@ async def message_send(request: Request, authorization: str = Header(None), a2a_
         if stored_entry["digest"] != msg_digest:
             raise HTTPException(status_code=409, detail="IDEMPOTENCY_CONFLICT")
         task_id = stored_entry["taskId"]
-        return {"task": user_db["tasks"][task_id]}
+        return JSONResponse(content={"task": user_db["tasks"][task_id]}, media_type="application/a2a+json")
 
     parts = message.get("parts", [])
     task_id = message.get("taskId")
@@ -84,7 +86,7 @@ async def message_send(request: Request, authorization: str = Header(None), a2a_
     if task_id and task_id in user_db["tasks"]:
         task = user_db["tasks"][task_id]
         if task["status"] == "TASK_STATE_COMPLETED":
-            return {"task": task}
+            return JSONResponse(content={"task": task}, media_type="application/a2a+json")
             
         for part in parts:
             if part.get("mediaType") == "application/vnd.ga5.invoice-claim-batch+json" or "results" in part.get("data", {}):
@@ -113,7 +115,7 @@ async def message_send(request: Request, authorization: str = Header(None), a2a_
                     }
                 })
                 save_db(db)
-                return {"task": task}
+                return JSONResponse(content={"task": task}, media_type="application/a2a+json")
 
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     context_id = message.get("contextId", f"ctx_{uuid.uuid4().hex[:12]}")
@@ -159,14 +161,14 @@ async def message_send(request: Request, authorization: str = Header(None), a2a_
     user_db["messages"][message_id] = {"digest": msg_digest, "taskId": task_id}
     save_db(db)
 
-    return {"task": task}
+    return JSONResponse(content={"task": task}, media_type="application/a2a+json")
 
 @app.get("/a2a/tasks")
 async def list_tasks(authorization: str = Header(None), a2a_version: str = Header(None)):
     token = verify_auth(authorization, a2a_version)
     db = load_db()
     user_tasks = list(db.get(token, {}).get("tasks", {}).values())
-    return {"tasks": user_tasks}
+    return JSONResponse(content={"tasks": user_tasks}, media_type="application/a2a+json")
 
 @app.get("/a2a/tasks/{task_id}")
 async def get_task(task_id: str, authorization: str = Header(None), a2a_version: str = Header(None)):
@@ -175,7 +177,7 @@ async def get_task(task_id: str, authorization: str = Header(None), a2a_version:
     tasks = db.get(token, {}).get("tasks", {})
     if task_id not in tasks:
         raise HTTPException(status_code=404, detail="Task not found")
-    return tasks[task_id]
+    return JSONResponse(content=tasks[task_id], media_type="application/a2a+json")
 
 @app.post("/a2a/tasks/{task_id}:cancel")
 async def cancel_task(task_id: str, authorization: str = Header(None), a2a_version: str = Header(None)):
@@ -191,4 +193,4 @@ async def cancel_task(task_id: str, authorization: str = Header(None), a2a_versi
     
     task["status"] = "TASK_STATE_CANCELED"
     save_db(db)
-    return task
+    return JSONResponse(content=task, media_type="application/a2a+json")

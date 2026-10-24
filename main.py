@@ -32,7 +32,8 @@ def verify_auth(authorization: str = Header(None), a2a_version: str = Header(Non
     return authorization.split(" ")[1]
 
 @app.get("/.well-known/agent-card.json")
-async def get_agent_card():
+async def get_agent_card(request: Request):
+    base_url = str(request.base_url).rstrip("/") + "/a2a/"
     return {
         "name": "Invoice Action Agent",
         "description": "A2A compliant invoice verification and action agent",
@@ -46,7 +47,7 @@ async def get_agent_card():
         "supportedInterfaces": [{
             "protocolBinding": "HTTP+JSON",
             "protocolVersion": "1.0",
-            "url": "https://invoice-agent-xxxx.onrender.com/a2a/" # Note: Grader expects exact base URL matching
+            "url": base_url
         }],
         "defaultInputModes": ["application/vnd.ga5.invoice-claim-batch+json"],
         "defaultOutputModes": [
@@ -70,7 +71,6 @@ async def message_send(request: Request, authorization: str = Header(None), a2a_
     db = load_db()
     user_db = db.setdefault(token, {"tasks": {}, "messages": {}})
 
-    # Check idempotency per principal + messageId
     if message_id in user_db["messages"]:
         stored_entry = user_db["messages"][message_id]
         if stored_entry["digest"] != msg_digest:
@@ -78,7 +78,6 @@ async def message_send(request: Request, authorization: str = Header(None), a2a_
         task_id = stored_entry["taskId"]
         return {"task": user_db["tasks"][task_id]}
 
-    # Check if this is a result continuation
     parts = message.get("parts", [])
     task_id = message.get("taskId")
     
@@ -87,7 +86,6 @@ async def message_send(request: Request, authorization: str = Header(None), a2a_
         if task["status"] == "TASK_STATE_COMPLETED":
             return {"task": task}
             
-        # Process result continuation
         for part in parts:
             if part.get("mediaType") == "application/vnd.ga5.invoice-claim-batch+json" or "results" in part.get("data", {}):
                 data = part.get("data", {})
@@ -117,7 +115,6 @@ async def message_send(request: Request, authorization: str = Header(None), a2a_
                 save_db(db)
                 return {"task": task}
 
-    # Initial message processing
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     context_id = message.get("contextId", f"ctx_{uuid.uuid4().hex[:12]}")
     
